@@ -131,16 +131,24 @@ def search_bilibili_by_title(title: str, output_dir: Path) -> Optional[Path]:
     """
     print(f"🔍 在 Bilibili 搜索: {title}")
 
+    # Skip if title is the default fallback
+    if title == "video":
+        print(f"⚠️ 搜索词过于通用，跳过 Bilibili 搜索")
+        print(f"💡 提示: 请使用 --title 参数指定搜索关键词")
+        return None
+
     # Clean up the title for better search results
     search_query = clean_title_for_search(title)
 
-    # Use yt-dlp to search Bilibili
-    search_url = f"ytsearch:bilibili {search_query}"
+    # Use Bilibili search URL with URL encoding
+    import urllib.parse
+    encoded_query = urllib.parse.quote(search_query)
+    search_url = f"https://search.bilibili.com/all?keyword={encoded_query}"
 
     ydl_opts = {
         'quiet': True,
         'no_warnings': True,
-        'extract_flat': True,
+        'extract_flat': 'in_playlist',  # Extract playlist/search results without downloading
         'playlistend': 10,  # Get top 10 results
     }
 
@@ -148,11 +156,15 @@ def search_bilibili_by_title(title: str, output_dir: Path) -> Optional[Path]:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             search_result = ydl.extract_info(search_url, download=False)
 
-            if not search_result or 'entries' not in search_result:
+            if not search_result:
                 print(f"❌ Bilibili 搜索未返回结果")
                 return None
 
-            entries = search_result['entries']
+            # Bilibili search returns entries directly
+            entries = search_result.get('entries', []) if isinstance(search_result, dict) else []
+            if not entries and isinstance(search_result, dict) and 'entries' in search_result:
+                entries = search_result['entries']
+
             if not entries:
                 print(f"❌ Bilibili 未找到相关视频")
                 return None
@@ -165,6 +177,11 @@ def search_bilibili_by_title(title: str, output_dir: Path) -> Optional[Path]:
 
             bilibili_url = best_match.get('url') or best_match.get('webpage_url')
             match_title = best_match.get('title', 'Unknown')
+
+            # Verify it's a Bilibili URL
+            if not bilibili_url or ('bilibili.com' not in bilibili_url):
+                print(f"⚠️ 搜索结果不是 Bilibili 链接")
+                return None
 
             print(f"🎯 找到最佳匹配: {match_title}")
             print(f"🔗 链接: {bilibili_url}")
@@ -634,15 +651,21 @@ def process_video(url: str, title: str = None, use_whisper: bool = True, whisper
 
     # Step 3: If YouTube failed, try Bilibili with the extracted title
     if not video_path:
-        if video_info and video_info['title']:
+        # Determine search title
+        if video_info and video_info['title'] and video_info['title'] != 'Unknown':
             search_title = video_info['title']
         elif title:
             search_title = title
         else:
-            search_title = "video"
+            search_title = None
 
-        print(f"\n🔄 YouTube 下载失败，尝试 Bilibili 搜索...")
-        video_path = search_bilibili_by_title(search_title, temp_dir)
+        if search_title:
+            print(f"\n🔄 YouTube 下载失败，尝试 Bilibili 搜索...")
+            video_path = search_bilibili_by_title(search_title, temp_dir)
+        else:
+            print(f"\n⚠️ 无法提取视频标题，跳过 Bilibili 搜索")
+            print(f"💡 提示: 使用 --title 参数手动指定搜索关键词")
+            print(f"   示例: python3 scripts/download_and_extract.py \"{url}\" --title \"视频标题\"")
 
     if not video_path:
         print(f"\n❌ 视频下载失败")

@@ -124,10 +124,10 @@ def download_from_youtube(url: str, output_dir: Path, cookies_file: str = None, 
         return None
 
 
-def search_bilibili_by_title(title: str, output_dir: Path) -> Optional[Path]:
+def search_bilibili_by_title(title: str, output_dir: Path) -> Tuple[Optional[Path], Optional[str]]:
     """
     Search Bilibili using the video title and download the best match.
-    Returns the path to downloaded video or None if failed.
+    Returns (video_path, bilibili_url) or (None, None) if failed.
     """
     print(f"🔍 在 Bilibili 搜索: {title}")
 
@@ -135,7 +135,7 @@ def search_bilibili_by_title(title: str, output_dir: Path) -> Optional[Path]:
     if title == "video":
         print(f"⚠️ 搜索词过于通用，跳过 Bilibili 搜索")
         print(f"💡 提示: 请使用 --title 参数指定搜索关键词")
-        return None
+        return (None, None)
 
     # Clean up the title for better search results
     search_query = clean_title_for_search(title)
@@ -160,7 +160,7 @@ def search_bilibili_by_title(title: str, output_dir: Path) -> Optional[Path]:
 
         if data.get('code') != 0:
             print(f"❌ Bilibili API 返回错误: {data.get('message', 'Unknown error')}")
-            return None
+            return (None, None)
 
         # Extract video results from API response
         # Structure: data.result.video is a list of video objects
@@ -169,7 +169,7 @@ def search_bilibili_by_title(title: str, output_dir: Path) -> Optional[Path]:
 
         if not video_results:
             print(f"❌ Bilibili 未找到相关视频")
-            return None
+            return (None, None)
 
         # Convert to format expected by find_best_bilibili_match
         entries = []
@@ -189,7 +189,7 @@ def search_bilibili_by_title(title: str, output_dir: Path) -> Optional[Path]:
 
         if not entries:
             print(f"❌ Bilibili 未找到相关视频")
-            return None
+            return (None, None)
 
         # Find best match
         best_match = find_best_bilibili_match(title, entries)
@@ -204,11 +204,12 @@ def search_bilibili_by_title(title: str, output_dir: Path) -> Optional[Path]:
         print(f"🔗 链接: {bilibili_url}")
 
         # Download the matched video
-        return download_from_url(bilibili_url, output_dir)
+        video_path = download_from_url(bilibili_url, output_dir)
+        return (video_path, bilibili_url)
 
     except Exception as e:
         print(f"❌ Bilibili 搜索失败: {e}")
-        return None
+        return (None, None)
 
 
 def clean_title_for_search(title: str) -> str:
@@ -651,6 +652,7 @@ def process_video(url: str, title: str = None, use_whisper: bool = True, whisper
 
     video_path = None
     video_info = None
+    actual_url = url  # Track the actual URL used for download (for subtitle extraction)
 
     # Step 1: Get video info first (extract title even if download fails)
     print(f"\n{'='*50}")
@@ -678,7 +680,10 @@ def process_video(url: str, title: str = None, use_whisper: bool = True, whisper
 
         if search_title:
             print(f"\n🔄 YouTube 下载失败，尝试 Bilibili 搜索...")
-            video_path = search_bilibili_by_title(search_title, temp_dir)
+            video_path, bilibili_url = search_bilibili_by_title(search_title, temp_dir)
+            if video_path and bilibili_url:
+                # Update actual_url to Bilibili URL for subtitle extraction
+                actual_url = bilibili_url
         else:
             print(f"\n⚠️ 无法提取视频标题，跳过 Bilibili 搜索")
             print(f"💡 提示: 使用 --title 参数手动指定搜索关键词")
@@ -689,7 +694,7 @@ def process_video(url: str, title: str = None, use_whisper: bool = True, whisper
         return False
 
     # Step 4: Extract subtitles (with Whisper fallback)
-    subtitle_path = extract_subtitles(video_path, subtitles_dir, url, use_whisper, cookies_file, cookies_from_browser)
+    subtitle_path = extract_subtitles(video_path, subtitles_dir, actual_url, use_whisper, cookies_file, cookies_from_browser)
 
     if subtitle_path:
         # Delete video file after successful extraction

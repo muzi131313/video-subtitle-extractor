@@ -162,14 +162,10 @@ def search_bilibili_by_title(title: str, output_dir: Path) -> Optional[Path]:
             print(f"❌ Bilibili API 返回错误: {data.get('message', 'Unknown error')}")
             return None
 
-        # Extract video results
-        result = data.get('data', {})
-        video_results = result.get('result', []) or result.get('video', []) or []
-
-        if not video_results:
-            # Try getting 'result' as a list directly
-            if isinstance(result, list) and result:
-                video_results = result[0].get('data', []) if isinstance(result[0], dict) else []
+        # Extract video results from API response
+        # Structure: data.result.video is a list of video objects
+        api_data = data.get('data', {})
+        video_results = api_data.get('result', {}).get('video', [])
 
         if not video_results:
             print(f"❌ Bilibili 未找到相关视频")
@@ -180,8 +176,9 @@ def search_bilibili_by_title(title: str, output_dir: Path) -> Optional[Path]:
         for video in video_results[:10]:  # Top 10 results
             if not isinstance(video, dict):
                 continue
-            bvid = video.get('bvid') or video.get('id')
-            title_found = video.get('title') or video.get('author')
+            bvid = video.get('bvid')
+            # Remove HTML tags from title
+            title_found = video.get('title', '').replace('<em class="keyword">', '').replace('</em>', '')
             if bvid:
                 entries.append({
                     'title': title_found,

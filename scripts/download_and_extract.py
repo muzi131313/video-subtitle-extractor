@@ -140,54 +140,74 @@ def search_bilibili_by_title(title: str, output_dir: Path) -> Optional[Path]:
     # Clean up the title for better search results
     search_query = clean_title_for_search(title)
 
-    # Use Bilibili search URL with URL encoding
+    # Use Bilibili API to search
     import urllib.parse
-    encoded_query = urllib.parse.quote(search_query)
-    search_url = f"https://search.bilibili.com/all?keyword={encoded_query}"
+    import json
 
-    ydl_opts = {
-        'quiet': True,
-        'no_warnings': True,
-        'extract_flat': 'in_playlist',  # Extract playlist/search results without downloading
-        'playlistend': 10,  # Get top 10 results
-    }
+    encoded_query = urllib.parse.quote(search_query)
+    api_url = f"https://api.bilibili.com/x/web-interface/search/all?keyword={encoded_query}&page=1&page_size=10"
 
     try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            search_result = ydl.extract_info(search_url, download=False)
+        # Make API request
+        import urllib.request
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+        req = urllib.request.Request(api_url, headers=headers)
 
-            if not search_result:
-                print(f"❌ Bilibili 搜索未返回结果")
-                return None
+        with urllib.request.urlopen(req, timeout=10) as response:
+            data = json.loads(response.read().decode())
 
-            # Bilibili search returns entries directly
-            entries = search_result.get('entries', []) if isinstance(search_result, dict) else []
-            if not entries and isinstance(search_result, dict) and 'entries' in search_result:
-                entries = search_result['entries']
+        if data.get('code') != 0:
+            print(f"❌ Bilibili API 返回错误: {data.get('message', 'Unknown error')}")
+            return None
 
-            if not entries:
-                print(f"❌ Bilibili 未找到相关视频")
-                return None
+        # Extract video results
+        result = data.get('data', {})
+        video_results = result.get('result', []) or result.get('video', []) or []
 
-            # Find best match
-            best_match = find_best_bilibili_match(title, entries)
-            if not best_match:
-                print(f"❌ 未找到匹配的视频")
-                return None
+        if not video_results:
+            # Try getting 'result' as a list directly
+            if isinstance(result, list) and result:
+                video_results = result[0].get('data', []) if isinstance(result[0], dict) else []
 
-            bilibili_url = best_match.get('url') or best_match.get('webpage_url')
-            match_title = best_match.get('title', 'Unknown')
+        if not video_results:
+            print(f"❌ Bilibili 未找到相关视频")
+            return None
 
-            # Verify it's a Bilibili URL
-            if not bilibili_url or ('bilibili.com' not in bilibili_url):
-                print(f"⚠️ 搜索结果不是 Bilibili 链接")
-                return None
+        # Convert to format expected by find_best_bilibili_match
+        entries = []
+        for video in video_results[:10]:  # Top 10 results
+            if not isinstance(video, dict):
+                continue
+            bvid = video.get('bvid') or video.get('id')
+            title_found = video.get('title') or video.get('author')
+            if bvid:
+                entries.append({
+                    'title': title_found,
+                    'url': f"https://www.bilibili.com/video/{bvid}",
+                    'webpage_url': f"https://www.bilibili.com/video/{bvid}",
+                    'id': bvid
+                })
 
-            print(f"🎯 找到最佳匹配: {match_title}")
-            print(f"🔗 链接: {bilibili_url}")
+        if not entries:
+            print(f"❌ Bilibili 未找到相关视频")
+            return None
 
-            # Download the matched video
-            return download_from_url(bilibili_url, output_dir)
+        # Find best match
+        best_match = find_best_bilibili_match(title, entries)
+        if not best_match:
+            # Fallback to first result
+            best_match = entries[0]
+
+        bilibili_url = best_match.get('url') or best_match.get('webpage_url')
+        match_title = best_match.get('title', 'Unknown')
+
+        print(f"🎯 找到最佳匹配: {match_title}")
+        print(f"🔗 链接: {bilibili_url}")
+
+        # Download the matched video
+        return download_from_url(bilibili_url, output_dir)
 
     except Exception as e:
         print(f"❌ Bilibili 搜索失败: {e}")

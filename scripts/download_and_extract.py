@@ -124,10 +124,10 @@ def download_from_youtube(url: str, output_dir: Path, cookies_file: str = None, 
         return None
 
 
-def search_bilibili_by_title(title: str, output_dir: Path) -> Tuple[Optional[Path], Optional[str]]:
+def search_bilibili_by_title(title: str, output_dir: Path) -> Tuple[Optional[Path], Optional[str], Optional[str]]:
     """
     Search Bilibili using the video title and download the best match.
-    Returns (video_path, bilibili_url) or (None, None) if failed.
+    Returns (video_path, bilibili_url, video_title) or (None, None, None) if failed.
     """
     print(f"🔍 在 Bilibili 搜索: {title}")
 
@@ -135,7 +135,7 @@ def search_bilibili_by_title(title: str, output_dir: Path) -> Tuple[Optional[Pat
     if title == "video":
         print(f"⚠️ 搜索词过于通用，跳过 Bilibili 搜索")
         print(f"💡 提示: 请使用 --title 参数指定搜索关键词")
-        return (None, None)
+        return (None, None, None)
 
     # Clean up the title for better search results
     search_query = clean_title_for_search(title)
@@ -160,7 +160,7 @@ def search_bilibili_by_title(title: str, output_dir: Path) -> Tuple[Optional[Pat
 
         if data.get('code') != 0:
             print(f"❌ Bilibili API 返回错误: {data.get('message', 'Unknown error')}")
-            return (None, None)
+            return (None, None, None)
 
         # Extract video results from API response
         # Structure: data.result.video is a list of video objects
@@ -169,7 +169,7 @@ def search_bilibili_by_title(title: str, output_dir: Path) -> Tuple[Optional[Pat
 
         if not video_results:
             print(f"❌ Bilibili 未找到相关视频")
-            return (None, None)
+            return (None, None, None)
 
         # Convert to format expected by find_best_bilibili_match
         entries = []
@@ -189,7 +189,7 @@ def search_bilibili_by_title(title: str, output_dir: Path) -> Tuple[Optional[Pat
 
         if not entries:
             print(f"❌ Bilibili 未找到相关视频")
-            return (None, None)
+            return (None, None, None)
 
         # Find best match
         best_match = find_best_bilibili_match(title, entries)
@@ -205,11 +205,11 @@ def search_bilibili_by_title(title: str, output_dir: Path) -> Tuple[Optional[Pat
 
         # Download the matched video
         video_path = download_from_url(bilibili_url, output_dir)
-        return (video_path, bilibili_url)
+        return (video_path, bilibili_url, match_title)
 
     except Exception as e:
         print(f"❌ Bilibili 搜索失败: {e}")
-        return (None, None)
+        return (None, None, None)
 
 
 def clean_title_for_search(title: str) -> str:
@@ -310,7 +310,7 @@ def download_from_url(url: str, output_dir: Path) -> Optional[Path]:
         return None
 
 
-def extract_subtitles(video_path: Path, output_dir: Path, url: str = None, use_whisper: bool = True, cookies_file: str = None, cookies_from_browser: str = None) -> Optional[Path]:
+def extract_subtitles(video_path: Path, output_dir: Path, url: str = None, use_whisper: bool = True, cookies_file: str = None, cookies_from_browser: str = None, video_title: str = None) -> Optional[Path]:
     """
     Extract subtitles from video.
     Tries multiple methods in order:
@@ -325,6 +325,7 @@ def extract_subtitles(video_path: Path, output_dir: Path, url: str = None, use_w
         use_whisper: Whether to use Whisper as fallback
         cookies_file: Path to cookies file for authentication
         cookies_from_browser: Browser name to load cookies from
+        video_title: Video title for naming the output file
 
     Returns:
         Path to the subtitle text file, or None if all methods failed
@@ -333,27 +334,27 @@ def extract_subtitles(video_path: Path, output_dir: Path, url: str = None, use_w
 
     # Method 1: Try to get subtitles from original URL
     if url:
-        subtitle_path = extract_subtitles_from_url(url, output_dir, cookies_file, cookies_from_browser)
+        subtitle_path = extract_subtitles_from_url(url, output_dir, cookies_file, cookies_from_browser, video_title)
         if subtitle_path:
             return subtitle_path
         print("⚠️ 无法从 URL 获取字幕，尝试从视频文件提取...")
 
     # Method 2: Try extracting embedded subtitles from video file
-    subtitle_path = extract_embedded_subtitles(video_path, output_dir)
+    subtitle_path = extract_embedded_subtitles(video_path, output_dir, video_title)
     if subtitle_path:
         return subtitle_path
 
     # Method 3: Use Whisper transcription as fallback
     if use_whisper:
         print("⚠️ 无可用字幕，尝试使用 Whisper 转录...")
-        subtitle_path = transcribe_with_whisper(video_path, output_dir)
+        subtitle_path = transcribe_with_whisper(video_path, output_dir, "base", video_title)
         if subtitle_path:
             return subtitle_path
 
     return None
 
 
-def extract_subtitles_from_url(url: str, output_dir: Path, cookies_file: str = None, cookies_from_browser: str = None) -> Optional[Path]:
+def extract_subtitles_from_url(url: str, output_dir: Path, cookies_file: str = None, cookies_from_browser: str = None, video_title: str = None) -> Optional[Path]:
     """
     Extract subtitles directly from URL using yt-dlp (without downloading video).
 
@@ -362,6 +363,7 @@ def extract_subtitles_from_url(url: str, output_dir: Path, cookies_file: str = N
         output_dir: Directory to save subtitles
         cookies_file: Path to cookies file for authentication
         cookies_from_browser: Browser name to load cookies from
+        video_title: Video title for naming the output file
     """
     ydl_opts = {
         'writesubtitles': True,
@@ -383,16 +385,20 @@ def extract_subtitles_from_url(url: str, output_dir: Path, cookies_file: str = N
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
 
-            # Find subtitle file
-            title = info.get('title', 'video')
+            # Use provided title or get from info
+            if video_title:
+                title = video_title
+            else:
+                title = info.get('title', 'video')
+
             safe_title = sanitize_filename(title)
 
             # Look for downloaded subtitle files
             for pattern in ['*.vtt', '*.zh-Hans.vtt', '*.zh.vtt', '*.en.vtt']:
                 for sub_file in output_dir.glob(pattern):
                     if sub_file.name.startswith(safe_title) or 'subtitles' in sub_file.name.lower():
-                        # Convert VTT to plain text
-                        txt_path = output_dir / f"{safe_title}_subtitles.txt"
+                        # Convert VTT to plain text - use title for output filename
+                        txt_path = output_dir / f"{safe_title}.txt"
                         if convert_vtt_to_txt(sub_file, txt_path):
                             return txt_path
 
@@ -403,9 +409,14 @@ def extract_subtitles_from_url(url: str, output_dir: Path, cookies_file: str = N
         return None
 
 
-def extract_embedded_subtitles(video_path: Path, output_dir: Path) -> Optional[Path]:
+def extract_embedded_subtitles(video_path: Path, output_dir: Path, video_title: str = None) -> Optional[Path]:
     """
     Extract embedded subtitles from video file using ffmpeg.
+
+    Args:
+        video_path: Path to the video file
+        output_dir: Directory to save subtitles
+        video_title: Video title for naming the output file
     """
     print("📝 尝试从视频文件提取嵌入式字幕...")
 
@@ -426,7 +437,7 @@ def extract_embedded_subtitles(video_path: Path, output_dir: Path) -> Optional[P
             if 'streams' in streams_info and streams_info['streams']:
                 # Found subtitle streams, extract the first one
                 subtitle_index = streams_info['streams'][0]['index']
-                return extract_subtitle_stream(video_path, output_dir, subtitle_index)
+                return extract_subtitle_stream(video_path, output_dir, subtitle_index, video_title)
 
     except Exception as e:
         pass
@@ -435,8 +446,15 @@ def extract_embedded_subtitles(video_path: Path, output_dir: Path) -> Optional[P
     return None
 
 
-def extract_subtitle_stream(video_path: Path, output_dir: Path, stream_index: int) -> Optional[Path]:
-    """Extract a specific subtitle stream from video."""
+def extract_subtitle_stream(video_path: Path, output_dir: Path, stream_index: int, video_title: str = None) -> Optional[Path]:
+    """Extract a specific subtitle stream from video.
+
+    Args:
+        video_path: Path to the video file
+        output_dir: Directory to save subtitles
+        stream_index: Index of the subtitle stream to extract
+        video_title: Video title for naming the output file
+    """
     output_path = output_dir / f"{video_path.stem}_subtitles.srt"
 
     cmd = [
@@ -450,8 +468,14 @@ def extract_subtitle_stream(video_path: Path, output_dir: Path, stream_index: in
     returncode, stdout, stderr = run_command(cmd, check=False)
 
     if returncode == 0 and output_path.exists():
+        # Generate output filename from title or video ID
+        if video_title:
+            safe_title = sanitize_filename(video_title)
+            txt_path = output_dir / f"{safe_title}.txt"
+        else:
+            txt_path = output_dir / f"{video_path.stem}_subtitles.txt"
+
         # Convert SRT to plain text
-        txt_path = output_dir / f"{video_path.stem}_subtitles.txt"
         if convert_srt_to_txt(output_path, txt_path):
             output_path.unlink()  # Remove SRT file
             return txt_path
@@ -554,7 +578,7 @@ def sanitize_filename(name: str) -> str:
     return name.strip()
 
 
-def transcribe_with_whisper(video_path: Path, output_dir: Path, model_size: str = "base") -> Optional[Path]:
+def transcribe_with_whisper(video_path: Path, output_dir: Path, model_size: str = "base", video_title: str = None) -> Optional[Path]:
     """
     Transcribe video using OpenAI Whisper model.
     This is used as a fallback when no subtitles are available.
@@ -563,6 +587,7 @@ def transcribe_with_whisper(video_path: Path, output_dir: Path, model_size: str 
         video_path: Path to the video file
         output_dir: Directory to save the transcription
         model_size: Whisper model size (tiny, base, small, medium, large)
+        video_title: Video title for naming the output file
 
     Returns:
         Path to the transcription text file, or None if failed
@@ -595,8 +620,13 @@ def transcribe_with_whisper(video_path: Path, output_dir: Path, model_size: str 
             transcript = result.get('text', '').strip()
 
         if transcript:
-            # Save to file
-            txt_path = output_dir / f"{video_path.stem}_transcript.txt"
+            # Generate filename from title or video ID
+            if video_title:
+                safe_title = sanitize_filename(video_title)
+                txt_path = output_dir / f"{safe_title}.txt"
+            else:
+                txt_path = output_dir / f"{video_path.stem}_transcript.txt"
+
             with open(txt_path, 'w', encoding='utf-8') as f:
                 f.write(transcript)
 
@@ -653,6 +683,7 @@ def process_video(url: str, title: str = None, use_whisper: bool = True, whisper
     video_path = None
     video_info = None
     actual_url = url  # Track the actual URL used for download (for subtitle extraction)
+    video_title = None  # Track the video title for naming subtitle file
 
     # Step 1: Get video info first (extract title even if download fails)
     print(f"\n{'='*50}")
@@ -661,7 +692,8 @@ def process_video(url: str, title: str = None, use_whisper: bool = True, whisper
 
     video_info = get_video_info(url, cookies_file, cookies_from_browser)
     if video_info:
-        print(f"📌 标题: {video_info['title']}")
+        video_title = video_info['title']
+        print(f"📌 标题: {video_title}")
         print(f"⏱️ 时长: {video_info['duration']} 秒")
 
     # Step 2: Try YouTube download first
@@ -680,10 +712,13 @@ def process_video(url: str, title: str = None, use_whisper: bool = True, whisper
 
         if search_title:
             print(f"\n🔄 YouTube 下载失败，尝试 Bilibili 搜索...")
-            video_path, bilibili_url = search_bilibili_by_title(search_title, temp_dir)
+            video_path, bilibili_url, bilibili_title = search_bilibili_by_title(search_title, temp_dir)
             if video_path and bilibili_url:
                 # Update actual_url to Bilibili URL for subtitle extraction
                 actual_url = bilibili_url
+                # Use Bilibili title if we don't have a title yet
+                if not video_title:
+                    video_title = bilibili_title
         else:
             print(f"\n⚠️ 无法提取视频标题，跳过 Bilibili 搜索")
             print(f"💡 提示: 使用 --title 参数手动指定搜索关键词")
@@ -694,7 +729,7 @@ def process_video(url: str, title: str = None, use_whisper: bool = True, whisper
         return False
 
     # Step 4: Extract subtitles (with Whisper fallback)
-    subtitle_path = extract_subtitles(video_path, subtitles_dir, actual_url, use_whisper, cookies_file, cookies_from_browser)
+    subtitle_path = extract_subtitles(video_path, subtitles_dir, actual_url, use_whisper, cookies_file, cookies_from_browser, video_title)
 
     if subtitle_path:
         # Delete video file after successful extraction

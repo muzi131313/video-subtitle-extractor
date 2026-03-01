@@ -40,7 +40,7 @@ def run_command(cmd: list, check: bool = True) -> Tuple[int, str, str]:
     return result.returncode, result.stdout, result.stderr
 
 
-def get_video_info(url: str, cookies_file: str = None) -> Optional[dict]:
+def get_video_info(url: str, cookies_file: str = None, cookies_from_browser: str = None) -> Optional[dict]:
     """
     Extract video info (title, id, etc.) without downloading.
     Works for both YouTube and other URLs.
@@ -48,6 +48,7 @@ def get_video_info(url: str, cookies_file: str = None) -> Optional[dict]:
     Args:
         url: Video URL
         cookies_file: Path to cookies file for authentication
+        cookies_from_browser: Browser name to load cookies from
     """
     print(f"🔍 获取视频信息...")
 
@@ -59,6 +60,8 @@ def get_video_info(url: str, cookies_file: str = None) -> Optional[dict]:
 
     if cookies_file:
         ydl_opts['cookiefile'] = cookies_file
+    elif cookies_from_browser:
+        ydl_opts['cookiesfrombrowser'] = (cookies_from_browser,)
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -76,7 +79,7 @@ def get_video_info(url: str, cookies_file: str = None) -> Optional[dict]:
         return None
 
 
-def download_from_youtube(url: str, output_dir: Path, cookies_file: str = None) -> Optional[Path]:
+def download_from_youtube(url: str, output_dir: Path, cookies_file: str = None, cookies_from_browser: str = None) -> Optional[Path]:
     """
     Download video from YouTube using yt-dlp.
     Returns the path to downloaded video or None if failed.
@@ -85,6 +88,7 @@ def download_from_youtube(url: str, output_dir: Path, cookies_file: str = None) 
         url: YouTube URL
         output_dir: Directory to save video
         cookies_file: Path to cookies file for authentication
+        cookies_from_browser: Browser name to load cookies from
     """
     print(f"📥 尝试从 YouTube 下载...")
 
@@ -99,6 +103,8 @@ def download_from_youtube(url: str, output_dir: Path, cookies_file: str = None) 
 
     if cookies_file:
         ydl_opts['cookiefile'] = cookies_file
+    elif cookies_from_browser:
+        ydl_opts['cookiesfrombrowser'] = (cookies_from_browser,)
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -269,7 +275,7 @@ def download_from_url(url: str, output_dir: Path) -> Optional[Path]:
         return None
 
 
-def extract_subtitles(video_path: Path, output_dir: Path, url: str = None, use_whisper: bool = True) -> Optional[Path]:
+def extract_subtitles(video_path: Path, output_dir: Path, url: str = None, use_whisper: bool = True, cookies_file: str = None, cookies_from_browser: str = None) -> Optional[Path]:
     """
     Extract subtitles from video.
     Tries multiple methods in order:
@@ -282,6 +288,8 @@ def extract_subtitles(video_path: Path, output_dir: Path, url: str = None, use_w
         output_dir: Directory to save subtitles
         url: Original video URL (for extracting subtitles without downloading)
         use_whisper: Whether to use Whisper as fallback
+        cookies_file: Path to cookies file for authentication
+        cookies_from_browser: Browser name to load cookies from
 
     Returns:
         Path to the subtitle text file, or None if all methods failed
@@ -290,7 +298,7 @@ def extract_subtitles(video_path: Path, output_dir: Path, url: str = None, use_w
 
     # Method 1: Try to get subtitles from original URL
     if url:
-        subtitle_path = extract_subtitles_from_url(url, output_dir)
+        subtitle_path = extract_subtitles_from_url(url, output_dir, cookies_file, cookies_from_browser)
         if subtitle_path:
             return subtitle_path
         print("⚠️ 无法从 URL 获取字幕，尝试从视频文件提取...")
@@ -310,9 +318,15 @@ def extract_subtitles(video_path: Path, output_dir: Path, url: str = None, use_w
     return None
 
 
-def extract_subtitles_from_url(url: str, output_dir: Path) -> Optional[Path]:
+def extract_subtitles_from_url(url: str, output_dir: Path, cookies_file: str = None, cookies_from_browser: str = None) -> Optional[Path]:
     """
     Extract subtitles directly from URL using yt-dlp (without downloading video).
+
+    Args:
+        url: Video URL
+        output_dir: Directory to save subtitles
+        cookies_file: Path to cookies file for authentication
+        cookies_from_browser: Browser name to load cookies from
     """
     ydl_opts = {
         'writesubtitles': True,
@@ -324,6 +338,11 @@ def extract_subtitles_from_url(url: str, output_dir: Path) -> Optional[Path]:
         'quiet': False,
         'no_warnings': False,
     }
+
+    if cookies_file:
+        ydl_opts['cookiefile'] = cookies_file
+    elif cookies_from_browser:
+        ydl_opts['cookiesfrombrowser'] = (cookies_from_browser,)
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -573,7 +592,7 @@ def update_gitignore(subtitles_dir: Path) -> None:
         print(f"✅ 已将 {entry} 添加到 .gitignore")
 
 
-def process_video(url: str, title: str = None, use_whisper: bool = True, whisper_model: str = "base", cookies_file: str = None) -> bool:
+def process_video(url: str, title: str = None, use_whisper: bool = True, whisper_model: str = "base", cookies_file: str = None, cookies_from_browser: str = None) -> bool:
     """
     Main workflow: download video, extract subtitles, cleanup.
     Returns True if successful, False otherwise.
@@ -584,6 +603,7 @@ def process_video(url: str, title: str = None, use_whisper: bool = True, whisper
         use_whisper: Whether to use Whisper transcription as fallback
         whisper_model: Whisper model size (tiny, base, small, medium, large)
         cookies_file: Path to cookies file for authentication
+        cookies_from_browser: Browser name to load cookies from
     """
     # Create output directories
     temp_dir = Path.cwd() / ".video_temp"
@@ -603,14 +623,14 @@ def process_video(url: str, title: str = None, use_whisper: bool = True, whisper
     print(f"处理视频: {url}")
     print(f"{'='*50}")
 
-    video_info = get_video_info(url, cookies_file)
+    video_info = get_video_info(url, cookies_file, cookies_from_browser)
     if video_info:
         print(f"📌 标题: {video_info['title']}")
         print(f"⏱️ 时长: {video_info['duration']} 秒")
 
     # Step 2: Try YouTube download first
     if "youtube.com" in url or "youtu.be" in url:
-        video_path = download_from_youtube(url, temp_dir, cookies_file)
+        video_path = download_from_youtube(url, temp_dir, cookies_file, cookies_from_browser)
 
     # Step 3: If YouTube failed, try Bilibili with the extracted title
     if not video_path:
@@ -629,7 +649,7 @@ def process_video(url: str, title: str = None, use_whisper: bool = True, whisper
         return False
 
     # Step 4: Extract subtitles (with Whisper fallback)
-    subtitle_path = extract_subtitles(video_path, subtitles_dir, url, use_whisper)
+    subtitle_path = extract_subtitles(video_path, subtitles_dir, url, use_whisper, cookies_file, cookies_from_browser)
 
     if subtitle_path:
         # Delete video file after successful extraction
@@ -643,7 +663,7 @@ def process_video(url: str, title: str = None, use_whisper: bool = True, whisper
         return False
 
 
-def process_batch(urls: List[str], titles: List[str] = None, cookies_file: str = None) -> None:
+def process_batch(urls: List[str], titles: List[str] = None, cookies_file: str = None, cookies_from_browser: str = None) -> None:
     """Process multiple videos."""
     if titles and len(titles) != len(urls):
         print("❌ 标题数量与链接数量不匹配")
@@ -654,7 +674,7 @@ def process_batch(urls: List[str], titles: List[str] = None, cookies_file: str =
     success_count = 0
     for i, url in enumerate(urls):
         title = titles[i] if titles else None
-        if process_video(url, title, cookies_file=cookies_file):
+        if process_video(url, title, cookies_file=cookies_file, cookies_from_browser=cookies_from_browser):
             success_count += 1
 
     print(f"\n{'='*50}")
@@ -682,17 +702,15 @@ def main():
 
     use_whisper = not args.no_whisper
     cookies_file = args.cookies
-
-    # Handle cookies-from-browser option by telling yt-dlp to use it directly
-    # We'll pass this as a special flag to the yt-dlp options
+    cookies_from_browser = args.cookies_from_browser
 
     if args.file:
         with open(args.file, 'r') as f:
             urls = [line.strip() for line in f if line.strip()]
-        process_batch(urls, cookies_file=cookies_file)
+        process_batch(urls, cookies_file=cookies_file, cookies_from_browser=cookies_from_browser)
 
     elif args.url:
-        process_video(args.url, args.title, use_whisper, args.whisper_model, cookies_file)
+        process_video(args.url, args.title, use_whisper, args.whisper_model, cookies_file, cookies_from_browser)
 
     else:
         parser.print_help()
